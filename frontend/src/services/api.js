@@ -1,22 +1,22 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API = axios.create({ baseURL: 'http://localhost:8000' });
 
-const api = axios.create({
-  baseURL: API_BASE_URL,
-});
-
-export const getPrediction = async (imageBlob) => {
-  const formData = new FormData();
-  formData.append('file', imageBlob, 'capture.jpg');
-  
-  const response = await api.post('/predict', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  });
-  
-  return response.data;
+export const getPrediction = async (blob) => {
+  const fd = new FormData();
+  fd.append('file', blob, 'image.jpg');
+  const r = await API.post('/predict', fd);
+  return r.data;
 };
 
-export default api;
+export const detectFaces = async (blob) => {
+  const fd = new FormData();
+  fd.append('file', blob, 'frame.jpg');
+  const r = await API.post('/detect', fd);
+  return r.data;  // { faces: [{x,y,w,h}, ...] }
+};
+
+export const getHealth = async () => {
+  const r = await API.get('/');
+  return r.data;
+};

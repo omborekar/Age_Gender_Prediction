@@ -1,35 +1,21 @@
 import React from 'react';
 
-const Loader = () => (
-  <div className="flex flex-col items-center justify-center py-12 gap-6">
-    {/* Nested spinner */}
-    <div className="relative w-20 h-20">
-      {/* Outer glow ring */}
-      <div className="absolute inset-0 rounded-full border border-cyan/10" />
-      {/* Ring 1 */}
-      <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-cyan animate-spin"
-           style={{ animationDuration: '1s' }} />
-      {/* Ring 2 */}
-      <div className="absolute inset-[6px] rounded-full border-2 border-transparent border-b-purple animate-spin"
-           style={{ animationDuration: '1.5s', animationDirection: 'reverse' }} />
-      {/* Ring 3 */}
-      <div className="absolute inset-3 rounded-full border border-transparent border-t-cyan/40 animate-spin"
-           style={{ animationDuration: '0.8s' }} />
-      {/* Core */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        <div className="w-3 h-3 rounded-full bg-cyan" style={{ boxShadow: '0 0 12px #00f2ff, 0 0 24px #00f2ff66' }} />
+export default function Loader() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '40px 20px' }}>
+      <div style={{ position: 'relative', width: 52, height: 52 }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid rgba(74,222,128,0.1)' }} />
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '2px solid transparent', borderTop: '2px solid #4ade80', animation: 'spin 0.9s linear infinite' }} />
+        <div style={{ position: 'absolute', inset: 6, borderRadius: '50%', border: '2px solid transparent', borderBottom: '2px solid #818cf8', animation: 'spin 1.4s linear infinite reverse' }} />
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 10px #4ade80' }} />
+        </div>
       </div>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', color: '#4ade80', textTransform: 'uppercase', letterSpacing: '0.3em' }}>Analyzing…</p>
+        <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', marginTop: 4, fontFamily: 'JetBrains Mono, monospace' }}>running inference</p>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
-
-    <div className="text-center space-y-1">
-      <p className="mono text-[10px] text-cyan tracking-[0.5em] uppercase animate-pulse">
-        Decoding Biometrics
-      </p>
-      <p className="mono text-[9px] text-white/20 tracking-widest italic">
-        running inference…
-      </p>
-    </div>
-  </div>
-);
-
-export default Loader;
+  );
+}

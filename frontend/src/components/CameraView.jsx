@@ -1,145 +1,194 @@
 import React, { useRef, useCallback, useState, useEffect } from 'react';
 import Webcam from 'react-webcam';
-import { Camera, RefreshCw, Radio, AlertTriangle } from 'lucide-react';
+import { Camera, RefreshCw, Video, WifiOff } from 'lucide-react';
+import { detectFaces } from '../services/api';
 
-const videoConstraints = { width: 1280, height: 720, facingMode: 'user' };
+const videoConstraints = { width: 640, height: 480, facingMode: 'user' };
 
-const CameraView = ({ onCapture, isProcessing, liveMode, lastFaceDetected }) => {
-  const webcamRef = useRef(null);
+export default function CameraView({ onCapture, isProcessing, liveMode }) {
+  const webcamRef  = useRef(null);
+  const canvasRef  = useRef(null);
+  const detectRef  = useRef(null); // interval for face detection
   const [imgSrc,   setImgSrc]   = useState(null);
-  const [camReady, setCamReady] = useState(false);
-  const [camError, setCamError] = useState(false);
+  const [ready,    setReady]    = useState(false);
+  const [camErr,   setCamErr]   = useState(false);
+  const [faces,    setFaces]    = useState([]); // [{x,y,w,h} normalised]
 
-  const capture = useCallback(() => {
-    if (!webcamRef.current) return;
-    const src = webcamRef.current.getScreenshot({ width: 640, height: 480 });
+  /* ─── Draw green boxes on overlay canvas ─────────────────────── */
+  const drawBoxes = useCallback((faceList) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!faceList.length) return;
+
+    ctx.strokeStyle = '#4ade80';
+    ctx.lineWidth   = 2;
+    ctx.font        = 'bold 11px "JetBrains Mono", monospace';
+    ctx.fillStyle   = '#4ade80';
+
+    faceList.forEach(({ x, y, w, h }) => {
+      const rx = x * canvas.width;
+      const ry = y * canvas.height;
+      const rw = w * canvas.width;
+      const rh = h * canvas.height;
+
+      /* Box */
+      ctx.strokeRect(rx, ry, rw, rh);
+
+      /* Corner accents */
+      const c = 12;
+      ctx.lineWidth = 3;
+      // top-left
+      ctx.beginPath(); ctx.moveTo(rx, ry + c); ctx.lineTo(rx, ry); ctx.lineTo(rx + c, ry); ctx.stroke();
+      // top-right
+      ctx.beginPath(); ctx.moveTo(rx + rw - c, ry); ctx.lineTo(rx + rw, ry); ctx.lineTo(rx + rw, ry + c); ctx.stroke();
+      // bottom-left
+      ctx.beginPath(); ctx.moveTo(rx, ry + rh - c); ctx.lineTo(rx, ry + rh); ctx.lineTo(rx + c, ry + rh); ctx.stroke();
+      // bottom-right
+      ctx.beginPath(); ctx.moveTo(rx + rw - c, ry + rh); ctx.lineTo(rx + rw, ry + rh); ctx.lineTo(rx + rw, ry + rh - c); ctx.stroke();
+      ctx.lineWidth = 2;
+
+      /* Label */
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(rx, ry - 18, 66, 18);
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText('FACE', rx + 4, ry - 4);
+    });
+  }, []);
+
+  /* ─── Face detection poll (every 600ms when cam is ready) ────── */
+  useEffect(() => {
+    if (!ready || imgSrc) { setFaces([]); drawBoxes([]); return; }
+
+    const detect = async () => {
+      try {
+        const wc = webcamRef.current;
+        if (!wc) return;
+        const src = wc.getScreenshot({ width: 320, height: 240 });
+        if (!src) return;
+        const blob = await fetch(src).then(r => r.blob());
+        const res  = await detectFaces(blob);
+        setFaces(res.faces || []);
+        drawBoxes(res.faces || []);
+      } catch { /* backend might not be up yet */ }
+    };
+
+    detectRef.current = setInterval(detect, 600);
+    return () => clearInterval(detectRef.current);
+  }, [ready, imgSrc, drawBoxes]);
+
+  /* ─── Live capture interval ─────────────────────────────────── */
+  const captureFrame = useCallback(() => {
+    const wc = webcamRef.current;
+    if (!wc) return;
+    const src = wc.getScreenshot();
     if (!src) return;
     if (!liveMode) setImgSrc(src);
     onCapture(src);
-  }, [webcamRef, onCapture, liveMode]);
+  }, [onCapture, liveMode]);
 
-  /* Live mode interval */
   useEffect(() => {
     if (!liveMode) return;
     setImgSrc(null);
-    const id = setInterval(capture, 2000);
+    const id = setInterval(captureFrame, 2500);
     return () => clearInterval(id);
-  }, [liveMode, capture]);
+  }, [liveMode, captureFrame]);
 
-  const retake = () => setImgSrc(null);
+  const retake = () => { setImgSrc(null); setFaces([]); };
 
   return (
-    <div className="flex flex-col items-center gap-5 w-full">
+    <div className="flex flex-col gap-3">
+      {/* Viewfinder */}
+      <div className="relative rounded-xl overflow-hidden" style={{ width: 400, height: 300, background: '#0c0c14', border: '1px solid rgba(255,255,255,0.1)' }}>
 
-      {/* ─── Viewfinder container ─── */}
-      <div
-        className="relative w-full rounded-2xl overflow-hidden glass neon-cyan animate-border"
-        style={{ aspectRatio: '16/10', maxWidth: 640 }}
-      >
-        {/* Feed */}
-        {!imgSrc ? (
+        {!imgSrc && (
           <Webcam
             audio={false}
             ref={webcamRef}
             screenshotFormat="image/jpeg"
-            screenshotQuality={0.92}
+            screenshotQuality={0.9}
             videoConstraints={videoConstraints}
-            onUserMedia={() => { setCamReady(true); setCamError(false); }}
-            onUserMediaError={() => { setCamReady(false); setCamError(true); }}
-            className="w-full h-full object-cover"
-            style={{ filter: 'brightness(0.88) saturate(1.1)' }}
+            onUserMedia={() => { setReady(true); setCamErr(false); }}
+            onUserMediaError={() => { setReady(false); setCamErr(true); }}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
-        ) : (
-          <img src={imgSrc} alt="captured" className="w-full h-full object-cover" />
         )}
 
-        {/* Scanline */}
-        {!imgSrc && camReady && (
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            <div
-              className="animate-scan absolute w-full"
-              style={{ height: 2, background: 'linear-gradient(90deg,transparent,#00f2ff,transparent)', boxShadow: '0 0 12px #00f2ff' }}
-            />
-          </div>
+        {imgSrc && (
+          <img src={imgSrc} alt="captured" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
 
-        {/* Corner brackets */}
-        {!imgSrc && camReady && (
-          <div className="absolute inset-4 pointer-events-none">
-            <div className="viewfinder-corner vc-tl" />
-            <div className="viewfinder-corner vc-tr" />
-            <div className="viewfinder-corner vc-bl" />
-            <div className="viewfinder-corner vc-br" />
-
-            {/* Face frame with badge */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-44 h-56">
-              <div className="absolute inset-0 rounded-[50%] border border-cyan/20" />
-              {lastFaceDetected !== null && (
-                <div className="face-badge">
-                  {lastFaceDetected ? 'Face Detected' : 'No Face – Full Frame'}
-                </div>
-              )}
-            </div>
-          </div>
+        {/* Canvas overlay for face boxes */}
+        {!imgSrc && (
+          <canvas
+            ref={canvasRef}
+            width={400}
+            height={300}
+            style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+          />
         )}
 
-        {/* Top-left rec badge */}
-        <div className="absolute top-3 left-4 flex items-center gap-2 pointer-events-none">
-          {liveMode
-            ? (<><span className="live-dot" /><span className="mono text-[9px] text-white/50 tracking-[0.2em] uppercase ml-2">Live</span></>)
-            : camReady
-            ? (<><span className="w-2 h-2 rounded-full bg-cyan/60 animate-pulse" /><span className="mono text-[9px] text-white/35 tracking-[0.15em] uppercase ml-1.5">Ready</span></>)
-            : null
-          }
+        {/* Top-left status badge */}
+        <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {liveMode ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: 'rgba(0,0,0,0.65)', borderRadius: 6, fontSize: 10, color: '#f43f5e', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <span style={{ position: 'relative', width: 7, height: 7, borderRadius: '50%', background: '#f43f5e', display: 'inline-block' }}>
+                <span className="live-ring" />
+              </span>
+              Live
+            </span>
+          ) : ready ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', background: 'rgba(0,0,0,0.6)', borderRadius: 6, fontSize: 10, color: '#4ade80', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <Video size={10} /> Cam Ready
+            </span>
+          ) : null}
         </div>
 
-        {/* Bottom-right resolution */}
-        {camReady && (
-          <div className="absolute bottom-3 right-4 pointer-events-none">
-            <span className="mono text-[9px] text-white/25 tracking-wider">1280×720</span>
+        {/* Face count badge */}
+        {faces.length > 0 && !imgSrc && (
+          <div style={{ position: 'absolute', top: 8, right: 8, padding: '3px 8px', background: 'rgba(74,222,128,0.2)', border: '1px solid rgba(74,222,128,0.5)', borderRadius: 6, fontSize: 10, color: '#4ade80', fontFamily: 'JetBrains Mono, monospace' }}>
+            {faces.length} face{faces.length > 1 ? 's' : ''}
           </div>
         )}
 
         {/* Processing overlay */}
         {isProcessing && !liveMode && (
-          <div className="absolute inset-0 bg-bg/75 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
-            <div className="w-12 h-12 rounded-full border-2 border-cyan/20 relative">
-              <div className="absolute inset-0 rounded-full border-2 border-t-cyan border-r-transparent border-b-transparent border-l-transparent animate-spin" />
-            </div>
-            <span className="mono text-[10px] text-cyan tracking-[0.4em] uppercase">Analyzing…</span>
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(12,12,20,0.8)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: '50%', border: '2px solid rgba(74,222,128,0.2)', borderTop: '2px solid #4ade80', animation: 'spin 0.9s linear infinite' }} />
+            <span style={{ fontSize: 10, color: '#4ade80', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.3em' }}>Analyzing…</span>
           </div>
         )}
 
         {/* Camera error */}
-        {camError && (
-          <div className="absolute inset-0 bg-bg/90 flex flex-col items-center justify-center gap-3">
-            <AlertTriangle className="w-8 h-8 text-yellow-400/60" />
-            <p className="mono text-[10px] text-white/30 uppercase tracking-widest text-center px-8">
-              Camera access denied<br /><span className="text-white/15">Enable permission in browser settings</span>
-            </p>
+        {camErr && (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(12,12,20,0.95)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <WifiOff size={28} color="rgba(255,255,255,0.2)" />
+            <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center', padding: '0 20px', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.05em' }}>Camera permission denied</p>
           </div>
         )}
+
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
 
-      {/* ─── Controls ─── */}
-      <div className="flex gap-3">
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 8 }}>
         {!liveMode ? (
-          !imgSrc
-            ? <button className="btn-primary" onClick={capture} disabled={isProcessing || !camReady}>
-                <Camera className="w-4 h-4" /> Capture Identity
-              </button>
-            : <button className="btn-ghost" onClick={retake} disabled={isProcessing}>
-                <RefreshCw className="w-4 h-4" /> Retake
-              </button>
+          !imgSrc ? (
+            <button className="btn-capture" onClick={captureFrame} disabled={isProcessing || !ready}>
+              <Camera size={15} /> Capture
+            </button>
+          ) : (
+            <button className="btn-secondary" onClick={retake}>
+              <RefreshCw size={14} /> Retake
+            </button>
+          )
         ) : (
-          <div className="flex items-center gap-3 px-8 py-3 rounded-full
-                          border border-cyan/20 bg-cyan/[0.07] mono text-[11px] text-cyan tracking-widest uppercase">
-            <Radio className="w-4 h-4 animate-pulse" /> Live Streaming
-          </div>
+          <span style={{ fontSize: 12, color: '#f43f5e', fontFamily: 'JetBrains Mono, monospace', padding: '11px 0', letterSpacing: '0.05em' }}>
+            ● Streaming every 2.5s…
+          </span>
         )}
       </div>
     </div>
   );
-};
-
-export default CameraView;
+}
